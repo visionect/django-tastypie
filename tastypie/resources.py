@@ -1376,7 +1376,7 @@ class Resource(object):
         bundle = self.build_bundle(request=request)
         # FIXME: This still kinda bites because it may not be the correct list
         #        of objects.
-        self.authorized_delete_list(self.get_object_list(request), bundle)
+        deletable_objects = self.authorized_delete_list(self.get_object_list(request), bundle)
         self.obj_delete_list(request=request, **self.remove_api_resource_names(kwargs))
         return http.HttpNoContent()
 
@@ -1476,7 +1476,6 @@ class Resource(object):
                     # so this is a create-by-PUT equivalent.
                     data = self.alter_deserialized_detail_data(request, data)
                     bundle = self.build_bundle(data=dict_strip_unicode_keys(data), request=request)
-                    bundle.obj.pk = obj.pk
                     self.authorized_create_detail(self.get_object_list(request), bundle)
                     self.obj_create(bundle, request=request)
             else:
@@ -2078,19 +2077,15 @@ class ModelResource(Resource):
         bundle = self.full_hydrate(bundle)
         return self.save(bundle, skip_errors=skip_errors)
 
-    def obj_delete_list(self, request=None, **kwargs):
+    def obj_delete_list(self, object_list, bundle):
         """
         A ORM-specific implementation of ``obj_delete_list``.
-
-        Takes optional ``kwargs``, which can be used to narrow the query.
         """
-        base_object_list = self.get_object_list(request).filter(**kwargs)
-
-        if hasattr(base_object_list, 'delete'):
+        if hasattr(object_list, 'delete'):
             # It's likely a ``QuerySet``. Call ``.delete()`` for efficiency.
-            base_object_list.delete()
+            object_list.delete()
         else:
-            for authed_obj in base_object_list:
+            for authed_obj in object_list:
                 authed_obj.delete()
 
     def obj_delete(self, request=None, **kwargs):
@@ -2242,10 +2237,8 @@ class ModelResource(Resource):
             related_objs = []
 
             for related_bundle in bundle.data[field_name]:
-                # FIXME: Dupe the original bundle, copy in the new object &
-                #        check the perms on that (usin the related resource)?
                 related_resource = field_object.get_related_resource(bundle.obj)
-                related_bundle = related_resource.build_bundle(obj=bundle.obj, request=bundle.request)
+                related_bundle = related_resource.build_bundle(obj=related_bundle.obj, request=bundle.request)
 
                 # FIXME: To avoid excessive saves, we may need to pass along a
                 #        set of objects/pks seens so as not to resave.

@@ -968,10 +968,10 @@ class TestOptionsResource(ModelResource):
 
 # Per user authorization bits.
 class PerUserAuthorization(Authorization):
-    def apply_limits(self, request, object_list):
-        if request and hasattr(request, 'user'):
-            if request.user.is_authenticated():
-                object_list = object_list.filter(author=request.user)
+    def read_list(self, object_list, bundle):
+        if bundle.request and hasattr(bundle.request, 'user'):
+            if bundle.request.user.is_authenticated():
+                object_list = object_list.filter(author=bundle.request.user)
             else:
                 object_list = object_list.none()
 
@@ -984,24 +984,27 @@ class PerUserNoteResource(NoteResource):
         queryset = Note.objects.all()
         authorization = PerUserAuthorization()
 
-    def apply_authorization_limits(self, request, object_list):
+    def authorized_read_list(self, object_list, bundle):
         if object_list._result_cache is not None:
             self._pre_limits = len(object_list._result_cache)
         else:
             self._pre_limits = 0
+
         # Just to demonstrate the per-resource hooks.
-        new_object_list = super(PerUserNoteResource, self).apply_authorization_limits(request, object_list)
+        new_object_list = super(PerUserNoteResource, self).authorized_read_list(object_list, bundle)
+
         if object_list._result_cache is not None:
             self._post_limits = len(object_list._result_cache)
         else:
             self._post_limits = 0
+
         return new_object_list.filter(is_active=True)
 # End per user authorization bits.
 
 
 # Per object authorization bits.
 class PerObjectAuthorization(Authorization):
-    def apply_limits(self, request, object_list):
+    def read_list(self, object_list, bundle):
         # Does a per-object check that "can't" be expressed as part of a
         # ``QuerySet``. This helps test that all objects in the ``QuerySet``
         # aren't loaded & evaluated, only results that match the request.
@@ -1024,13 +1027,15 @@ class PerObjectNoteResource(NoteResource):
             'is_active': ALL,
         }
 
-    def apply_authorization_limits(self, request, object_list):
+    def authorized_read_list(self, object_list, bundle):
         if object_list._result_cache is not None:
             self._pre_limits = len(object_list._result_cache)
         else:
             self._pre_limits = 0
+
         # Check the QuerySet cache to make sure we haven't populated everything.
-        new_object_list = super(PerObjectNoteResource, self).apply_authorization_limits(request, object_list)
+        new_object_list = super(PerObjectNoteResource, self).authorized_read_list(object_list, bundle)
+
         self._post_limits = len(object_list._result_cache)
         return new_object_list
 # End per object authorization bits.
@@ -2418,12 +2423,14 @@ class ModelResourceTestCase(TestCase):
             class Meta:
                 queryset = Note.objects.all()
 
-            def apply_authorization_limits(self, request, obj_list):
-                return tuple(obj_list[:2])
+            def authorized_delete_list(self, object_list, bundle):
+                return tuple(object_list[:2])
 
+        request = HttpRequest()
+        request.method = 'DELETE'
         self.assertEqual(len(Note.objects.all()), 6)
         # This is a regression. Used to fail miserably.
-        notes = NonQuerysetNoteResource().obj_delete_list()
+        notes = NonQuerysetNoteResource().delete_list(request=request)
         self.assertEqual(len(Note.objects.all()), 4)
 
     def test_obj_create(self):
@@ -2890,54 +2897,76 @@ class ModelResourceTestCase(TestCase):
         from django.contrib.auth.models import AnonymousUser, User
 
         punr = PerUserNoteResource()
-        empty_request = type('MockRequest', (object,), {'GET': {}})
-        anony_request = type('MockRequest', (object,), {'user': AnonymousUser()})
-        authed_request = type('MockRequest', (object,), {'user': User.objects.get(username='johndoe')})
-        authed_request2 = type('MockRequest', (object,), {'user': User.objects.get(username='janedoe')})
+        empty_request = HttpRequest()
+        empty_request.method = 'GET'
+        empty_request.GET = {'format': 'json'}
+
+        anony_request = HttpRequest()
+        anony_request.method = 'GET'
+        anony_request.GET = {'format': 'json'}
+        anony_request.user = AnonymousUser()
+
+        authed_request = HttpRequest()
+        authed_request.method = 'GET'
+        authed_request.GET = {'format': 'json'}
+        authed_request.user = User.objects.get(username='johndoe')
+
+        authed_request_2 = HttpRequest()
+        authed_request_2.method = 'GET'
+        authed_request_2.GET = {'format': 'json'}
+        authed_request_2.user = User.objects.get(username='janedoe')
 
         self.assertEqual(punr._meta.queryset.count(), 6)
 
         # Requests without a user get all active objects, regardless of author.
-        self.assertEqual(punr.apply_authorization_limits(empty_request, punr.get_object_list(empty_request)).count(), 4)
+        empty_bundle = punr.build_bundle(request=empty_request)
+        self.assertEqual(punr.authorized_read_list(punr.get_object_list(empty_request), empty_bundle).count(), 4)
         self.assertEqual(punr._pre_limits, 0)
         # Shouldn't hit the DB yet.
         self.assertEqual(punr._post_limits, 0)
-        self.assertEqual(punr.obj_get_list(request=empty_request).count(), 4)
+        self.assertEqual(len(json.loads(punr.get_list(request=empty_request).content)['objects']), 4)
 
         # Requests with an Anonymous user get no objects.
-        self.assertEqual(punr.apply_authorization_limits(anony_request, punr.get_object_list(anony_request)).count(), 0)
-        self.assertEqual(punr.obj_get_list(request=anony_request).count(), 0)
+        anony_bundle = punr.build_bundle(request=anony_request)
+        self.assertEqual(punr.authorized_read_list(punr.get_object_list(anony_request), anony_bundle).count(), 0)
+        self.assertEqual(len(json.loads(punr.get_list(request=anony_request).content)['objects']), 0)
 
         # Requests with an authenticated user get all objects for that user
         # that are active.
-        self.assertEqual(punr.apply_authorization_limits(authed_request, punr.get_object_list(authed_request)).count(), 2)
-        self.assertEqual(punr.obj_get_list(request=authed_request).count(), 2)
+        authed_bundle = punr.build_bundle(request=authed_request)
+        self.assertEqual(punr.authorized_read_list(punr.get_object_list(authed_request), authed_bundle).count(), 2)
+        self.assertEqual(len(json.loads(punr.get_list(request=authed_request).content)['objects']), 2)
 
         # Demonstrate that a different user gets different objects.
-        self.assertEqual(punr.apply_authorization_limits(authed_request2, punr.get_object_list(authed_request2)).count(), 2)
-        self.assertEqual(punr.obj_get_list(request=authed_request2).count(), 2)
-        self.assertEqual(list(punr.apply_authorization_limits(authed_request, punr.get_object_list(authed_request)).values_list('id', flat=True)), [1, 2])
-        self.assertEqual(list(punr.apply_authorization_limits(authed_request2, punr.get_object_list(authed_request2)).values_list('id', flat=True)), [4, 6])
+        authed_bundle_2 = punr.build_bundle(request=authed_request_2)
+        self.assertEqual(punr.authorized_read_list(punr.get_object_list(authed_request_2), authed_bundle_2).count(), 2)
+        self.assertEqual(len(json.loads(punr.get_list(request=authed_request_2).content)['objects']), 2)
+        self.assertEqual(list(punr.authorized_read_list(punr.get_object_list(authed_request), authed_bundle).values_list('id', flat=True)), [1, 2])
+        self.assertEqual(list(punr.authorized_read_list(punr.get_object_list(authed_request_2), authed_bundle_2).values_list('id', flat=True)), [4, 6])
 
     def test_per_object_authorization(self):
         ponr = PerObjectNoteResource()
-        empty_request = type('MockRequest', (object,), {'GET': {}})
+        empty_request = HttpRequest()
+        empty_request.method = 'GET'
+        empty_request.GET = {'format': 'json'}
 
         self.assertEqual(ponr._meta.queryset.count(), 6)
+        empty_bundle = ponr.build_bundle(request=empty_request)
 
         # Should return only two objects with 'post' in the ``title``.
         self.assertEqual(len(ponr.get_object_list(empty_request)), 6)
-        self.assertEqual(len(ponr.apply_authorization_limits(empty_request, ponr.get_object_list(empty_request))), 2)
+        self.assertEqual(len(ponr.authorized_read_list(ponr.get_object_list(empty_request), empty_bundle)), 2)
         self.assertEqual(ponr._pre_limits, 0)
         # Since the objects weren't filtered, we hit everything.
         self.assertEqual(ponr._post_limits, 6)
 
-        self.assertEqual(len(ponr.obj_get_list(request=empty_request)), 2)
+        self.assertEqual(len(json.loads(ponr.get_list(request=empty_request).content)['objects']), 2)
         self.assertEqual(ponr._pre_limits, 0)
         # Since the objects weren't filtered, we again hit everything.
         self.assertEqual(ponr._post_limits, 6)
 
-        self.assertEqual(len(ponr.obj_get_list(request=empty_request, is_active=True)), 2)
+        empty_request.GET['is_active'] = True
+        self.assertEqual(len(json.loads(ponr.get_list(request=empty_request).content)['objects']), 2)
         self.assertEqual(ponr._pre_limits, 0)
         # This time, the objects were filtered, so we should only iterate over
         # a (hopefully much smaller) subset.

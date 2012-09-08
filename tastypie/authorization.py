@@ -46,7 +46,7 @@ class Authorization(object):
         Unimplemented, as Tastypie never creates entire new lists, but
         present for consistency & possible extension.
         """
-        raise NotImplementedError("Tastypie has not way to determine if all objects should be allowed to be created.")
+        raise NotImplementedError("Tastypie has no way to determine if all objects should be allowed to be created.")
 
     def create_detail(self, object_list, bundle):
         """
@@ -151,10 +151,10 @@ class DjangoAuthorization(Authorization):
         klass = self.base_checks(bundle.request, object_list.model)
 
         if klass is False:
-            return False
+            return []
 
         # GET-style methods are always allowed.
-        return True
+        return object_list
 
     def read_detail(self, object_list, bundle):
         klass = self.base_checks(bundle.request, bundle.obj.__class__)
@@ -169,10 +169,14 @@ class DjangoAuthorization(Authorization):
         klass = self.base_checks(bundle.request, object_list.model)
 
         if klass is False:
-            return False
+            return []
 
         permission = '%s.add_%s' % (klass._meta.app_label, klass._meta.module_name)
-        return bundle.request.user.has_perm(permission)
+
+        if not bundle.request.user.has_perm(permission):
+            return []
+
+        return object_list
 
     def create_detail(self, object_list, bundle):
         klass = self.base_checks(bundle.request, bundle.obj.__class__)
@@ -184,13 +188,17 @@ class DjangoAuthorization(Authorization):
         return bundle.request.user.has_perm(permission)
 
     def update_list(self, object_list, bundle):
-        klass = self.base_checks(bundle.request, bundle.request, object_list.model)
+        klass = self.base_checks(bundle.request, object_list.model)
 
         if klass is False:
-            return False
+            return []
 
         permission = '%s.change_%s' % (klass._meta.app_label, klass._meta.module_name)
-        return bundle.request.user.has_perm(permission)
+
+        if not bundle.request.user.has_perm(permission):
+            return []
+
+        return object_list
 
     def update_detail(self, object_list, bundle):
         klass = self.base_checks(bundle.request, bundle.obj.__class__)
@@ -205,10 +213,14 @@ class DjangoAuthorization(Authorization):
         klass = self.base_checks(bundle.request, object_list.model)
 
         if klass is False:
-            return False
+            return []
 
         permission = '%s.delete_%s' % (klass._meta.app_label, klass._meta.module_name)
-        return bundle.request.user.has_perm(permission)
+
+        if not bundle.request.user.has_perm(permission):
+            return []
+
+        return object_list
 
     def delete_detail(self, object_list, bundle):
         klass = self.base_checks(bundle.request, bundle.obj.__class__)
