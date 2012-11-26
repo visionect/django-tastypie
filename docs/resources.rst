@@ -1214,7 +1214,7 @@ This needs to be implemented at the user level.
 ``obj_get_list``
 ----------------
 
-.. method:: Resource.obj_get_list(self, request=None, **kwargs)
+.. method:: Resource.obj_get_list(self, bundle, **kwargs)
 
 Fetches the list of objects available on the resource.
 
@@ -1226,7 +1226,7 @@ Fetches the list of objects available on the resource.
 ``cached_obj_get_list``
 -----------------------
 
-.. method:: Resource.cached_obj_get_list(self, request=None, **kwargs)
+.. method:: Resource.cached_obj_get_list(self, bundle, **kwargs)
 
 A version of ``obj_get_list`` that uses the cache as a means to get
 commonly-accessed data faster.
@@ -1234,7 +1234,7 @@ commonly-accessed data faster.
 ``obj_get``
 -----------
 
-.. method:: Resource.obj_get(self, request=None, **kwargs)
+.. method:: Resource.obj_get(self, bundle, **kwargs)
 
 Fetches an individual object on the resource.
 
@@ -1247,7 +1247,7 @@ be found, this should raise a ``NotFound`` exception.
 ``cached_obj_get``
 ------------------
 
-.. method:: Resource.cached_obj_get(self, request=None, **kwargs)
+.. method:: Resource.cached_obj_get(self, bundle, **kwargs)
 
 A version of ``obj_get`` that uses the cache as a means to get
 commonly-accessed data faster.
@@ -1255,7 +1255,7 @@ commonly-accessed data faster.
 ``obj_create``
 --------------
 
-.. method:: Resource.obj_create(self, bundle, request=None, **kwargs)
+.. method:: Resource.obj_create(self, bundle, **kwargs)
 
 Creates a new object based on the provided data.
 
@@ -1276,7 +1276,7 @@ lookup parameters that can find them in the DB.
 ``obj_update``
 --------------
 
-.. method:: Resource.obj_update(self, bundle, request=None, **kwargs)
+.. method:: Resource.obj_update(self, bundle, **kwargs)
 
 Updates an existing object (or creates a new object) based on the
 provided data.
@@ -1289,7 +1289,7 @@ provided data.
 ``obj_delete_list``
 -------------------
 
-.. method:: Resource.obj_delete_list(self, request=None, **kwargs)
+.. method:: Resource.obj_delete_list(self, bundle, **kwargs)
 
 Deletes an entire list of objects.
 
@@ -1301,7 +1301,7 @@ Deletes an entire list of objects.
 ``obj_delete``
 --------------
 
-.. method:: Resource.obj_delete(self, request=None, **kwargs)
+.. method:: Resource.obj_delete(self, bundle, **kwargs)
 
 Deletes a single object.
 
@@ -1322,7 +1322,7 @@ Mostly a useful shortcut/hook.
 ``is_valid``
 ------------
 
-.. method:: Resource.is_valid(self, bundle, request=None)
+.. method:: Resource.is_valid(self, bundle)
 
 Handles checking if the data provided by the user is valid.
 

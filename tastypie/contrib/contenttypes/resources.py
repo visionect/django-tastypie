@@ -1,3 +1,4 @@
+from tastypie.bundle import Bundle
 from tastypie.resources import ModelResource
 from tastypie.exceptions import NotFound
 from django.core.urlresolvers import resolve, Resolver404, get_script_prefix
@@ -7,7 +8,6 @@ class GenericResource(ModelResource):
     """
     Provides a stand-in resource for GFK relations.
     """
-
     def get_via_uri(self, uri, request=None):
         """
         This pulls apart the salient bits of the URI and populates the
@@ -30,5 +30,6 @@ class GenericResource(ModelResource):
             raise NotFound("The URL provided '%s' was not a link to a valid resource." % uri)
 
         parent_resource = view.func_closure[0].cell_contents.func_closure[0].cell_contents
-        return parent_resource.obj_get(**self.remove_api_resource_names(kwargs))
+        bundle = Bundle(request=request)
+        return parent_resource.obj_get(bundle, **self.remove_api_resource_names(kwargs))
 

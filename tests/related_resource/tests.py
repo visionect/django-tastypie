@@ -278,7 +278,6 @@ class NestedRelatedResourceTest(TestCase):
         resp = pr.put_detail(request, pk=pk)
         self.assertEqual(resp.status_code, 204)
 
-
     def test_one_to_many(self):
         """
         Test a related ToOne resource with a nested full ToMany resource
@@ -307,6 +306,9 @@ class NestedRelatedResourceTest(TestCase):
         request.raw_post_data = json.dumps(data)
         resp = pr.post_list(request)
         self.assertEqual(resp.status_code, 201)
+        self.assertEqual(Person.objects.count(), 1)
+        self.assertEqual(Company.objects.count(), 1)
+        self.assertEqual(Product.objects.count(), 1)
 
         pk = Person.objects.all()[0].pk
         request = MockRequest()
@@ -327,10 +329,12 @@ class NestedRelatedResourceTest(TestCase):
         request = MockRequest()
         request.GET = {'format': 'json'}
         request.method = 'PUT'
-        request.raw_post_data = resp.content
+        # Sending the URL will cause Tastypie to go into a downward spiral,
+        # since it's a child object of the (already-included) parent.
+        del person['company']['products'][0]['producer']
+        request.raw_post_data = json.dumps(person)
         resp = pr.put_detail(request, pk=pk)
         self.assertEqual(resp.status_code, 204)
-
 
     def test_many_to_one(self):
         """
@@ -360,6 +364,9 @@ class NestedRelatedResourceTest(TestCase):
         request.raw_post_data = json.dumps(data)
         resp = pr.post_list(request)
         self.assertEqual(resp.status_code, 201)
+        self.assertEqual(Person.objects.count(), 1)
+        self.assertEqual(Dog.objects.count(), 1)
+        self.assertEqual(DogHouse.objects.count(), 1)
 
         pk = Person.objects.all()[0].pk
         request = MockRequest()
@@ -380,10 +387,12 @@ class NestedRelatedResourceTest(TestCase):
         request = MockRequest()
         request.GET = {'format': 'json'}
         request.method = 'PUT'
-        request.raw_post_data = resp.content
+        # Sending the URL will cause Tastypie to go into a downward spiral,
+        # since it's a child object of the (already-included) parent.
+        del person['dogs'][0]['owner']
+        request.raw_post_data = json.dumps(person)
         resp = pr.put_detail(request, pk=pk)
         self.assertEqual(resp.status_code, 204)
-
 
     def test_many_to_many(self):
         """
@@ -415,6 +424,9 @@ class NestedRelatedResourceTest(TestCase):
         request.raw_post_data = json.dumps(data)
         resp = pr.post_list(request)
         self.assertEqual(resp.status_code, 201)
+        self.assertEqual(Person.objects.count(), 1)
+        self.assertEqual(Dog.objects.count(), 1)
+        self.assertEqual(Bone.objects.count(), 1)
 
         pk = Person.objects.all()[0].pk
         request = MockRequest()
@@ -436,6 +448,10 @@ class NestedRelatedResourceTest(TestCase):
         request = MockRequest()
         request.GET = {'format': 'json'}
         request.method = 'PUT'
-        request.raw_post_data = resp.content
+        # Sending the URL will cause Tastypie to go into a downward spiral,
+        # since it's a child object of the (already-included) parent.
+        del person['dogs'][0]['owner']
+        del person['dogs'][0]['bones'][0]['dog']
+        request.raw_post_data = json.dumps(person)
         resp = pr.put_detail(request, pk=pk)
         self.assertEqual(resp.status_code, 204)

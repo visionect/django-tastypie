@@ -91,6 +91,10 @@ class FreshNoteResource(ModelResource):
         resource_name = 'freshnote'
         authorization = Authorization()
 
+    def hydrate_m2m(self, *args, **kwargs):
+        import pdb; pdb.set_trace()
+        return super(FreshNoteResource, self).hydrate_m2m(*args, **kwargs)
+
 
 class FreshMediaBitResource(ModelResource):
     note = fields.ToOneField(FreshNoteResource, 'note')
@@ -162,4 +166,3 @@ class DogResource(ModelResource):
         queryset = Dog.objects.all()
         resource_name = 'dog'
         authorization = Authorization()
-

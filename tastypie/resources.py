@@ -797,7 +797,8 @@ class Resource(object):
         except Resolver404:
             raise NotFound("The URL provided '%s' was not a link to a valid resource." % uri)
 
-        return self.obj_get(request=request, **self.remove_api_resource_names(kwargs))
+        bundle = self.build_bundle(request=request)
+        return self.obj_get(bundle=bundle, **self.remove_api_resource_names(kwargs))
 
     # Data preparation.
 
@@ -1042,7 +1043,7 @@ class Resource(object):
         """
         raise NotImplementedError()
 
-    def obj_get_list(self, request=None, **kwargs):
+    def obj_get_list(self, bundle, **kwargs):
         """
         Fetches the list of objects available on the resource.
 
@@ -1053,7 +1054,7 @@ class Resource(object):
         """
         raise NotImplementedError()
 
-    def cached_obj_get_list(self, request=None, **kwargs):
+    def cached_obj_get_list(self, bundle, **kwargs):
         """
         A version of ``obj_get_list`` that uses the cache as a means to get
         commonly-accessed data faster.
@@ -1062,12 +1063,12 @@ class Resource(object):
         obj_list = self._meta.cache.get(cache_key)
 
         if obj_list is None:
-            obj_list = self.obj_get_list(request=request, **kwargs)
+            obj_list = self.obj_get_list(bundle=bundle, **kwargs)
             self._meta.cache.set(cache_key, obj_list)
 
         return obj_list
 
-    def obj_get(self, request=None, **kwargs):
+    def obj_get(self, bundle, **kwargs):
         """
         Fetches an individual object on the resource.
 
@@ -1079,21 +1080,21 @@ class Resource(object):
         """
         raise NotImplementedError()
 
-    def cached_obj_get(self, request=None, **kwargs):
+    def cached_obj_get(self, bundle, **kwargs):
         """
         A version of ``obj_get`` that uses the cache as a means to get
         commonly-accessed data faster.
         """
         cache_key = self.generate_cache_key('detail', **kwargs)
-        bundle = self._meta.cache.get(cache_key)
+        cached_bundle = self._meta.cache.get(cache_key)
 
-        if bundle is None:
-            bundle = self.obj_get(request=request, **kwargs)
-            self._meta.cache.set(cache_key, bundle)
+        if cached_bundle is None:
+            cached_bundle = self.obj_get(bundle=bundle, **kwargs)
+            self._meta.cache.set(cache_key, cached_bundle)
 
-        return bundle
+        return cached_bundle
 
-    def obj_create(self, bundle, request=None, **kwargs):
+    def obj_create(self, bundle, **kwargs):
         """
         Creates a new object based on the provided data.
 
@@ -1104,7 +1105,7 @@ class Resource(object):
         """
         raise NotImplementedError()
 
-    def obj_update(self, bundle, request=None, **kwargs):
+    def obj_update(self, bundle, **kwargs):
         """
         Updates an existing object (or creates a new object) based on the
         provided data.
@@ -1116,7 +1117,7 @@ class Resource(object):
         """
         raise NotImplementedError()
 
-    def obj_delete_list(self, request=None, **kwargs):
+    def obj_delete_list(self, bundle, **kwargs):
         """
         Deletes an entire list of objects.
 
@@ -1127,7 +1128,7 @@ class Resource(object):
         """
         raise NotImplementedError()
 
-    def obj_delete(self, request=None, **kwargs):
+    def obj_delete(self, bundle, **kwargs):
         """
         Deletes a single object.
 
@@ -1158,7 +1159,7 @@ class Resource(object):
         response = http.HttpBadRequest(content=serialized, content_type=build_content_type(desired_format))
         raise ImmediateHttpResponse(response=response)
 
-    def is_valid(self, bundle, request=None):
+    def is_valid(self, bundle):
         """
         Handles checking if the data provided by the user is valid.
 
@@ -1168,7 +1169,7 @@ class Resource(object):
         If validation fails, an error is raised with the error messages
         serialized inside it.
         """
-        errors = self._meta.validation.is_valid(bundle, request)
+        errors = self._meta.validation.is_valid(bundle, bundle.request)
 
         if errors:
             bundle.errors[self._meta.resource_name] = errors
@@ -1202,8 +1203,8 @@ class Resource(object):
         """
         # TODO: Uncached for now. Invalidation that works for everyone may be
         #       impossible.
-        objects = self.obj_get_list(request=request, **self.remove_api_resource_names(kwargs))
-        objects = self.authorized_read_list(objects, self.build_bundle(request=request))
+        base_bundle = self.build_bundle(request=request)
+        objects = self.obj_get_list(bundle=base_bundle, **self.remove_api_resource_names(kwargs))
         sorted_objects = self.apply_sorting(objects, options=request.GET)
 
         paginator = self._meta.paginator_class(request.GET, sorted_objects, resource_uri=self.get_resource_uri(), limit=self._meta.limit, max_limit=self._meta.max_limit, collection_name=self._meta.collection_name)
@@ -1229,15 +1230,16 @@ class Resource(object):
 
         Should return a HttpResponse (200 OK).
         """
+        basic_bundle = self.build_bundle(request=request)
+
         try:
-            obj = self.cached_obj_get(request=request, **self.remove_api_resource_names(kwargs))
+            obj = self.cached_obj_get(bundle=basic_bundle, **self.remove_api_resource_names(kwargs))
         except ObjectDoesNotExist:
             return http.HttpNotFound()
         except MultipleObjectsReturned:
             return http.HttpMultipleChoices("More than one resource is found at this URI.")
 
         bundle = self.build_bundle(obj=obj, request=request)
-        self.authorized_read_detail(self.get_object_list(request), bundle)
         bundle = self.full_dehydrate(bundle)
         bundle = self.alter_detail_data_to_serialize(request, bundle)
         return self.create_response(request, bundle)
@@ -1256,8 +1258,7 @@ class Resource(object):
         deserialized = self.deserialize(request, request.raw_post_data, format=request.META.get('CONTENT_TYPE', 'application/json'))
         deserialized = self.alter_deserialized_detail_data(request, deserialized)
         bundle = self.build_bundle(data=dict_strip_unicode_keys(deserialized), request=request)
-        self.authorized_create_detail(self.get_object_list(request), bundle)
-        updated_bundle = self.obj_create(bundle, request=request, **self.remove_api_resource_names(kwargs))
+        updated_bundle = self.obj_create(bundle, **self.remove_api_resource_names(kwargs))
         location = self.get_resource_uri(updated_bundle)
 
         if not self._meta.always_return_data:
@@ -1297,7 +1298,8 @@ class Resource(object):
         if not 'objects' in deserialized:
             raise BadRequest("Invalid data sent.")
 
-        self.obj_delete_list(request=request, **self.remove_api_resource_names(kwargs))
+        basic_bundle = self.build_bundle(request=request)
+        self.obj_delete_list(bundle=basic_bundle, **self.remove_api_resource_names(kwargs))
         bundles_seen = []
 
         for object_data in deserialized['objects']:
@@ -1306,8 +1308,7 @@ class Resource(object):
             # Attempt to be transactional, deleting any previously created
             # objects if validation fails.
             try:
-                self.authorized_update_detail(self.get_object_list(request), bundle)
-                self.obj_create(bundle, request=request, **self.remove_api_resource_names(kwargs))
+                self.obj_create(bundle=bundle, **self.remove_api_resource_names(kwargs))
                 bundles_seen.append(bundle)
             except ImmediateHttpResponse:
                 self.rollback(bundles_seen)
@@ -1343,10 +1344,9 @@ class Resource(object):
         deserialized = self.deserialize(request, request.raw_post_data, format=request.META.get('CONTENT_TYPE', 'application/json'))
         deserialized = self.alter_deserialized_detail_data(request, deserialized)
         bundle = self.build_bundle(data=dict_strip_unicode_keys(deserialized), request=request)
-        self.authorized_update_detail(self.get_object_list(request), bundle)
 
         try:
-            updated_bundle = self.obj_update(bundle, request=request, **self.remove_api_resource_names(kwargs))
+            updated_bundle = self.obj_update(bundle=bundle, **self.remove_api_resource_names(kwargs))
 
             if not self._meta.always_return_data:
                 return http.HttpNoContent()
@@ -1355,7 +1355,7 @@ class Resource(object):
                 updated_bundle = self.alter_detail_data_to_serialize(request, updated_bundle)
                 return self.create_response(request, updated_bundle, response_class=http.HttpAccepted)
         except (NotFound, MultipleObjectsReturned):
-            updated_bundle = self.obj_create(bundle, request=request, **self.remove_api_resource_names(kwargs))
+            updated_bundle = self.obj_create(bundle=bundle, **self.remove_api_resource_names(kwargs))
             location = self.get_resource_uri(updated_bundle)
 
             if not self._meta.always_return_data:
@@ -1374,10 +1374,7 @@ class Resource(object):
         If the resources are deleted, return ``HttpNoContent`` (204 No Content).
         """
         bundle = self.build_bundle(request=request)
-        # FIXME: This still kinda bites because it may not be the correct list
-        #        of objects.
-        deletable_objects = self.authorized_delete_list(self.get_object_list(request), bundle)
-        self.obj_delete_list(request=request, **self.remove_api_resource_names(kwargs))
+        self.obj_delete_list(bundle=bundle, request=request, **self.remove_api_resource_names(kwargs))
         return http.HttpNoContent()
 
     def delete_detail(self, request, **kwargs):
@@ -1389,11 +1386,12 @@ class Resource(object):
         If the resource is deleted, return ``HttpNoContent`` (204 No Content).
         If the resource did not exist, return ``Http404`` (404 Not Found).
         """
-        bundle = self.build_bundle(request=request)
-        self.authorized_delete_detail(self.get_object_list(request), bundle)
+        # Manually construct the bundle here, since we don't want to try to
+        # delete an empty instance.
+        bundle = Bundle(request=request)
 
         try:
-            self.obj_delete(request=request, **self.remove_api_resource_names(kwargs))
+            self.obj_delete(bundle=bundle, **self.remove_api_resource_names(kwargs))
             return http.HttpNoContent()
         except NotFound:
             return http.HttpNotFound()
@@ -1476,15 +1474,13 @@ class Resource(object):
                     # so this is a create-by-PUT equivalent.
                     data = self.alter_deserialized_detail_data(request, data)
                     bundle = self.build_bundle(data=dict_strip_unicode_keys(data), request=request)
-                    self.authorized_create_detail(self.get_object_list(request), bundle)
-                    self.obj_create(bundle, request=request)
+                    self.obj_create(bundle=bundle)
             else:
                 # There's no resource URI, so this is a create call just
                 # like a POST to the list resource.
                 data = self.alter_deserialized_detail_data(request, data)
                 bundle = self.build_bundle(data=dict_strip_unicode_keys(data), request=request)
-                self.authorized_create_detail(self.get_object_list(request), bundle)
-                self.obj_create(bundle, request=request)
+                self.obj_create(bundle=bundle)
 
         if len(deserialized.get('deleted_objects', [])) and 'delete' not in self._meta.detail_allowed_methods:
             raise ImmediateHttpResponse(response=http.HttpMethodNotAllowed())
@@ -1492,8 +1488,7 @@ class Resource(object):
         for uri in deserialized.get('deleted_objects', []):
             obj = self.get_via_uri(uri, request=request)
             bundle = self.build_bundle(obj=obj, request=request)
-            self.authorized_delete_detail(self.get_object_list(request), bundle)
-            self.obj_delete(request=request, _obj=obj)
+            self.obj_delete(bundle=bundle)
 
         return http.HttpAccepted()
 
@@ -1507,6 +1502,7 @@ class Resource(object):
         If the resource did not exist, return ``HttpNotFound`` (404 Not Found).
         """
         request = convert_post_to_patch(request)
+        basic_bundle = self.build_bundle(request=request)
 
         # We want to be able to validate the update, but we can't just pass
         # the partial data into the validator since all data needs to be
@@ -1515,7 +1511,7 @@ class Resource(object):
         # So first pull out the original object. This is essentially
         # ``get_detail``.
         try:
-            obj = self.cached_obj_get(request=request, **self.remove_api_resource_names(kwargs))
+            obj = self.cached_obj_get(bundle=basic_bundle, **self.remove_api_resource_names(kwargs))
         except ObjectDoesNotExist:
             return http.HttpNotFound()
         except MultipleObjectsReturned:
@@ -1546,12 +1542,11 @@ class Resource(object):
         # we're basically in the same spot as a PUT request. SO the rest of this
         # function is cribbed from put_detail.
         self.alter_deserialized_detail_data(request, original_bundle.data)
-        self.authorized_update_detail(self.get_object_list(request), original_bundle)
         kwargs = {
             self._meta.detail_uri_name: self.get_bundle_detail_data(original_bundle),
             'request': request,
         }
-        return self.obj_update(original_bundle, **kwargs)
+        return self.obj_update(bundle=original_bundle, **kwargs)
 
     def get_schema(self, request, **kwargs):
         """
@@ -1567,7 +1562,7 @@ class Resource(object):
         self.throttle_check(request)
         self.log_throttled_access(request)
         bundle = self.build_bundle(request=request)
-        self.authorized_read_detail(self.get_object_list(request), bundle)
+        self.authorized_read_detail(self.get_object_list(bundle.request), bundle)
         return self.create_response(request, self.build_schema())
 
     def get_multiple(self, request, **kwargs):
@@ -1589,15 +1584,14 @@ class Resource(object):
         obj_identifiers = kwargs.get(kwarg_name, '').split(';')
         objects = []
         not_found = []
+        base_bundle = self.build_bundle(request=request)
 
         for identifier in obj_identifiers:
             try:
-                obj = self.obj_get(request, **{self._meta.detail_uri_name: identifier})
+                obj = self.obj_get(bundle=base_bundle, **{self._meta.detail_uri_name: identifier})
                 bundle = self.build_bundle(obj=obj, request=request)
                 bundle = self.full_dehydrate(bundle)
-
-                if self.authorized_read_detail(self.get_object_list(request), bundle):
-                    objects.append(bundle)
+                objects.append(bundle)
             except (ObjectDoesNotExist, Unauthorized):
                 not_found.append(identifier)
 
@@ -1962,7 +1956,7 @@ class ModelResource(Resource):
         """
         return self._meta.queryset._clone()
 
-    def obj_get_list(self, request=None, **kwargs):
+    def obj_get_list(self, bundle, **kwargs):
         """
         A ORM-specific implementation of ``obj_get_list``.
 
@@ -1971,20 +1965,21 @@ class ModelResource(Resource):
         """
         filters = {}
 
-        if hasattr(request, 'GET'):
+        if hasattr(bundle.request, 'GET'):
             # Grab a mutable copy.
-            filters = request.GET.copy()
+            filters = bundle.request.GET.copy()
 
         # Update with the provided kwargs.
         filters.update(kwargs)
         applicable_filters = self.build_filters(filters=filters)
 
         try:
-            return self.apply_filters(request, applicable_filters)
+            objects = self.apply_filters(bundle.request, applicable_filters)
+            return self.authorized_read_list(objects, bundle)
         except ValueError:
             raise BadRequest("Invalid resource lookup data provided (mismatched type).")
 
-    def obj_get(self, request=None, **kwargs):
+    def obj_get(self, bundle, **kwargs):
         """
         A ORM-specific implementation of ``obj_get``.
 
@@ -1992,7 +1987,7 @@ class ModelResource(Resource):
         the instance.
         """
         try:
-            object_list = self.get_object_list(request).filter(**kwargs)
+            object_list = self.get_object_list(bundle.request).filter(**kwargs)
             stringified_kwargs = ', '.join(["%s=%s" % (k, v) for k, v in kwargs.items()])
 
             if len(object_list) <= 0:
@@ -2000,20 +1995,22 @@ class ModelResource(Resource):
             elif len(object_list) > 1:
                 raise MultipleObjectsReturned("More than '%s' matched '%s'." % (self._meta.object_class.__name__, stringified_kwargs))
 
-            return object_list[0]
+            bundle.obj = object_list[0]
+            self.authorized_read_detail(object_list, bundle)
+            return bundle.obj
         except ValueError:
             raise NotFound("Invalid resource lookup data provided (mismatched type).")
 
-    def obj_create(self, bundle, request=None, **kwargs):
+    def obj_create(self, bundle, **kwargs):
         """
         A ORM-specific implementation of ``obj_create``.
         """
-
         bundle.obj = self._meta.object_class()
 
         for key, value in kwargs.items():
             setattr(bundle.obj, key, value)
 
+        self.authorized_create_detail(self.get_object_list(bundle.request), bundle)
         bundle = self.full_hydrate(bundle)
         return self.save(bundle)
 
@@ -2056,7 +2053,7 @@ class ModelResource(Resource):
 
         return lookup_kwargs
 
-    def obj_update(self, bundle, request=None, skip_errors=False, **kwargs):
+    def obj_update(self, bundle, skip_errors=False, **kwargs):
         """
         A ORM-specific implementation of ``obj_update``.
         """
@@ -2070,40 +2067,43 @@ class ModelResource(Resource):
                 lookup_kwargs = kwargs
 
             try:
-                bundle.obj = self.obj_get(bundle.request, **lookup_kwargs)
+                bundle.obj = self.obj_get(bundle=bundle, **lookup_kwargs)
             except ObjectDoesNotExist:
                 raise NotFound("A model instance matching the provided arguments could not be found.")
 
+        self.authorized_update_detail(self.get_object_list(bundle.request), bundle)
         bundle = self.full_hydrate(bundle)
         return self.save(bundle, skip_errors=skip_errors)
 
-    def obj_delete_list(self, object_list, bundle):
+    def obj_delete_list(self, bundle, **kwargs):
         """
         A ORM-specific implementation of ``obj_delete_list``.
         """
-        if hasattr(object_list, 'delete'):
+        objects_to_delete = self.obj_get_list(bundle=bundle, **kwargs)
+        deletable_objects = self.authorized_delete_list(objects_to_delete, bundle)
+
+        if hasattr(deletable_objects, 'delete'):
             # It's likely a ``QuerySet``. Call ``.delete()`` for efficiency.
-            object_list.delete()
+            deletable_objects.delete()
         else:
-            for authed_obj in object_list:
+            for authed_obj in deletable_objects:
                 authed_obj.delete()
 
-    def obj_delete(self, request=None, **kwargs):
+    def obj_delete(self, bundle, **kwargs):
         """
         A ORM-specific implementation of ``obj_delete``.
 
         Takes optional ``kwargs``, which are used to narrow the query to find
         the instance.
         """
-        obj = kwargs.pop('_obj', None)
-
-        if not hasattr(obj, 'delete'):
+        if not hasattr(bundle.obj, 'delete'):
             try:
-                obj = self.obj_get(request, **kwargs)
+                bundle.obj = self.obj_get(bundle=bundle, **kwargs)
             except ObjectDoesNotExist:
                 raise NotFound("A model instance matching the provided arguments could not be found.")
 
-        obj.delete()
+        self.authorized_delete_detail(self.get_object_list(bundle.request), bundle)
+        bundle.obj.delete()
 
     @transaction.commit_on_success()
     def patch_list(self, request, **kwargs):
@@ -2127,7 +2127,7 @@ class ModelResource(Resource):
                 bundle.obj.delete()
 
     def save(self, bundle, skip_errors=False):
-        self.is_valid(bundle, bundle.request)
+        self.is_valid(bundle)
 
         if bundle.errors and not skip_errors:
             self.error_response(bundle.errors, bundle.request)
@@ -2189,7 +2189,11 @@ class ModelResource(Resource):
                     setattr(related_obj, field_object.related_name, bundle.obj)
 
                 related_resource = field_object.get_related_resource(related_obj)
-                related_bundle = related_resource.build_bundle(obj=related_obj, request=bundle.request)
+                related_bundle = related_resource.build_bundle(
+                    obj=related_obj,
+                    data=bundle.data.get(field_name),
+                    request=bundle.request
+                )
 
                 # FIXME: To avoid excessive saves, we may need to pass along a
                 #        set of objects/pks seens so as not to resave.
@@ -2238,12 +2242,16 @@ class ModelResource(Resource):
 
             for related_bundle in bundle.data[field_name]:
                 related_resource = field_object.get_related_resource(bundle.obj)
-                related_bundle = related_resource.build_bundle(obj=related_bundle.obj, request=bundle.request)
+                updated_related_bundle = related_resource.build_bundle(
+                    obj=related_bundle.obj,
+                    data=related_bundle.data,
+                    request=bundle.request
+                )
 
                 # FIXME: To avoid excessive saves, we may need to pass along a
                 #        set of objects/pks seens so as not to resave.
-                related_resource.save(related_bundle)
-                related_objs.append(related_bundle.obj)
+                related_resource.save(updated_related_bundle)
+                related_objs.append(updated_related_bundle.obj)
 
             related_mngr.add(*related_objs)
 
