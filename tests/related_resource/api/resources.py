@@ -92,7 +92,8 @@ class FreshNoteResource(ModelResource):
         authorization = Authorization()
 
     def hydrate_m2m(self, *args, **kwargs):
-        import pdb; pdb.set_trace()
+        # FIXME: Uncomment here to dig into how the hydrate/saves go wrong.
+        # import pdb; pdb.set_trace()
         return super(FreshNoteResource, self).hydrate_m2m(*args, **kwargs)
 
 
